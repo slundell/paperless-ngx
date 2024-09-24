@@ -940,17 +940,12 @@ class SearchResultSerializer(DocumentSerializer):
             documents = self.fetch_documents([hit["id"]])
         document = documents[hit["id"]]
 
-        notes = ",".join(
-            [str(c.note) for c in document.notes.all()],
-        )
         r = super().to_representation(document)
         r["__search_hit__"] = {
-            "score": hit.score,
-            "highlights": hit.highlights("content", text=document.content),
-            "note_highlights": (
-                hit.highlights("notes", text=notes) if document else None
-            ),
-            "rank": hit.rank,
+            "score": hit["score"],
+            "highlights": hit["highlights"],
+            "note_highlights": hit["note_highlights"],
+            "rank": hit["rank"],
         }
 
         return r

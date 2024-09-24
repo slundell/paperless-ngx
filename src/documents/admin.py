@@ -80,9 +80,9 @@ class DocumentAdmin(GuardedModelAdmin):
     def delete_queryset(self, request, queryset):
         from documents import index
 
-        with index.open_index_writer() as writer:
+        with index.get_writer() as writer:
             for o in queryset:
-                index.remove_document(writer, o)
+                index.txn_remove(writer, o)
 
         super().delete_queryset(request, queryset)
 

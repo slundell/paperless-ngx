@@ -164,9 +164,9 @@ def delete(doc_ids: list[int]):
 
     from documents import index
 
-    with index.open_index_writer() as writer:
+    with index.get_writer() as writer:
         for id in doc_ids:
-            index.remove_document_by_id(writer, id)
+            index.txn_remove_by_id(writer, id)
 
     return "OK"
 

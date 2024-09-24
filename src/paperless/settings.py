@@ -1192,6 +1192,14 @@ EMAIL_ENABLE_GPG_DECRYPTOR: Final[bool] = __get_boolean(
 
 
 ###############################################################################
-# Soft Delete
+# Soft Delete                                                                 #
 ###############################################################################
+
 EMPTY_TRASH_DELAY = max(__get_int("PAPERLESS_EMPTY_TRASH_DELAY", 30), 1)
+
+
+###############################################################################
+# Indexing for full-text search                                               #
+###############################################################################
+
+INDEX_TOKENIZER: Final[str] = os.getenv("PAPERLESS_INDEX_TOKENIZER", "en_stem")

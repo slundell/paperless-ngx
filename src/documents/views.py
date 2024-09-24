@@ -860,12 +860,15 @@ class UnifiedSearchViewSet(DocumentViewSet):
             else:
                 raise ValueError
 
-            return query_class(
+            r = query_class(
                 self.searcher,
                 self.request.query_params,
                 self.paginator.get_page_size(self.request),
                 filter_queryset=filtered_queryset,
             )
+            from icecream import ic
+            ic(r)
+            return r
         else:
             return filtered_queryset
 
@@ -874,9 +877,8 @@ class UnifiedSearchViewSet(DocumentViewSet):
             from documents import index
 
             try:
-                with index.open_index_searcher() as s:
-                    self.searcher = s
-                    return super().list(request)
+                self.searcher = index.index().searcher()
+                return super().list(request)
             except NotFound:
                 raise
             except Exception as e:
@@ -1158,7 +1160,7 @@ class SearchAutoCompleteView(APIView):
 
         from documents import index
 
-        ix = index.open_index()
+        ix = index.index()
 
         return Response(
             index.autocomplete(
@@ -1196,18 +1198,16 @@ class GlobalSearchView(PassUserMixin):
             if not db_only and len(docs) < OBJECT_LIMIT:
                 # If we don't have enough results, search by content
                 from documents import index
-
-                with index.open_index_searcher() as s:
-                    fts_query = index.DelayedFullTextQuery(
-                        s,
+                fts_query = index.DelayedFullTextQuery(
+                        index.index().searcher(),
                         request.query_params,
                         OBJECT_LIMIT,
                         filter_queryset=all_docs,
-                    )
-                    results = fts_query[0:1]
-                    docs = docs | Document.objects.filter(
-                        id__in=[r["id"] for r in results],
-                    )
+                )
+                results = fts_query[0:1]
+                docs = docs | Document.objects.filter(
+                    id__in=[r["id"] for r in results["hits"]],
+                )
             docs = docs[:OBJECT_LIMIT]
         saved_views = (
             SavedView.objects.filter(owner=request.user, name__icontains=query)
@@ -1963,10 +1963,9 @@ class SystemStatusView(PassUserMixin):
 
         index_error = None
         try:
-            ix = index.open_index()
             index_status = "OK"
             index_last_modified = make_aware(
-                datetime.fromtimestamp(ix.last_modified()),
+                datetime.fromtimestamp(index.last_modified()),
             )
         except Exception as e:
             index_status = "ERROR"

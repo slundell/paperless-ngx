@@ -16,7 +16,6 @@ from django.db import transaction
 from django.db.models.signals import post_save
 from django.utils import timezone
 from filelock import FileLock
-from whoosh.writing import AsyncWriter
 
 from documents import index
 from documents import sanity_checker
@@ -53,19 +52,19 @@ logger = logging.getLogger("paperless.tasks")
 
 @shared_task
 def index_optimize():
-    ix = index.open_index()
-    writer = AsyncWriter(ix)
-    writer.commit(optimize=True)
+   index.optimize()
 
 
 def index_reindex(progress_bar_disable=False):
     documents = Document.objects.all()
 
-    ix = index.open_index(recreate=True)
+    index.index(recreate=True)
 
-    with AsyncWriter(ix) as writer:
+    with index.get_writer() as writer:
         for document in tqdm.tqdm(documents, disable=progress_bar_disable):
-            index.update_document(writer, document)
+            index.txn_upsert(writer, document)
+        logger.info("Committing index")
+    logger.info("Indexing complete")
 
 
 @shared_task
@@ -190,7 +189,7 @@ def sanity_check():
 def bulk_update_documents(document_ids):
     documents = Document.objects.filter(id__in=document_ids)
 
-    ix = index.open_index()
+
 
     for doc in documents:
         clear_document_caches(doc.pk)
@@ -201,9 +200,9 @@ def bulk_update_documents(document_ids):
         )
         post_save.send(Document, instance=doc, created=False)
 
-    with AsyncWriter(ix) as writer:
+    with index.index_writer() as writer:
         for doc in documents:
-            index.update_document(writer, doc)
+            index.txn_upsert(writer, doc)
 
 
 @shared_task
@@ -283,8 +282,7 @@ def update_document_archive_file(document_id):
             logger.info(
                 f"Updating index for document {document_id} ({document.archive_checksum})",
             )
-            with index.open_index_writer() as writer:
-                index.update_document(writer, document)
+            index.upsert(document)
 
             clear_document_caches(document.pk)
 

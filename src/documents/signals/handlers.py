@@ -508,8 +508,7 @@ def set_log_entry(sender, document: Document, logging_group=None, **kwargs):
 
 def add_to_index(sender, document, **kwargs):
     from documents import index
-
-    index.add_or_update_document(document)
+    index.upsert(document)
 
 
 def run_workflow_added(sender, document: Document, logging_group=None, **kwargs):
