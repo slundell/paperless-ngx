@@ -1,25 +1,18 @@
 import logging
-import math
 import os
-import json
-from collections import Counter
 from contextlib import contextmanager
-from datetime import datetime
-from datetime import timezone
 from shutil import rmtree
 from typing import Optional
 
 import tantivy
 from django.conf import settings
 from django.db.models import QuerySet
-from django.utils import timezone as django_timezone
 from guardian.shortcuts import get_users_with_perms
 
 from documents.models import CustomFieldInstance
 from documents.models import Document
 from documents.models import Note
 from documents.models import User
-
 
 logger = logging.getLogger("paperless.index")
 
@@ -33,7 +26,9 @@ def get_schema():
     schema_builder.add_text_field("content", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_integer_field("asn", stored=True, indexed=True)
     schema_builder.add_text_field("correspondent", stored=True)
-    schema_builder.add_integer_field("correspondent_id", stored=True, indexed=True, fast=True)
+    schema_builder.add_integer_field(
+        "correspondent_id", stored=True, indexed=True, fast=True
+    )
     schema_builder.add_boolean_field("has_correspondent", stored=True, indexed=True)
     schema_builder.add_text_field("tag", stored=True)
     schema_builder.add_integer_field("tag_id", stored=True, indexed=True, fast=True)
@@ -50,7 +45,9 @@ def get_schema():
     schema_builder.add_text_field("notes", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_integer_field("num_notes", stored=True, indexed=True, fast=True)
     schema_builder.add_text_field("custom_fields", stored=True)
-    schema_builder.add_integer_field("custom_field_count", stored=True, indexed=True, fast=True)
+    schema_builder.add_integer_field(
+        "custom_field_count", stored=True, indexed=True, fast=True
+    )
     schema_builder.add_boolean_field("has_custom_fields", stored=True, indexed=True)
     schema_builder.add_integer_field("custom_fields_id", stored=True, indexed=True)
     schema_builder.add_text_field("owner", stored=True)
@@ -71,12 +68,17 @@ def optimize():
     writer.garbage_collect_files()
     writer.wait_merging_threads()
 
+
 def index(recreate=False) -> tantivy.Index:
-    try:
-        return tantivy.Index(schema=get_schema(), path=str(settings.INDEX_DIR), reuse=not recreate)
-    except Exception as e:
-        logger.exception(f"Unable to open index: {settings.INDEX_DIR!s}")
-        logger.exception(f"Caught exception: {e!s}")
+    if not recreate:
+        try:
+            return tantivy.Index(
+                schema=get_schema(), path=str(settings.INDEX_DIR), reuse=True
+            )
+        except Exception as e:
+            logger.exception(f"Unable to open index: {settings.INDEX_DIR!s}")
+            logger.exception(f"Caught exception: {e!s}")
+
     logger.info(f"Creating new index: {settings.INDEX_DIR!s}")
     if os.path.isdir(str(settings.INDEX_DIR)):
         rmtree(str(settings.INDEX_DIR))
@@ -84,13 +86,14 @@ def index(recreate=False) -> tantivy.Index:
 
     return tantivy.Index(schema=get_schema(), path=str(settings.INDEX_DIR), reuse=False)
 
+
 def last_modified():
-    #index(recreate=False))
+    # index(recreate=False))
     return None
 
 
 @contextmanager
-def get_writer(): # -> tantivy.IndexWriter:
+def get_writer():  # -> tantivy.IndexWriter:
     writer = index().writer()
 
     try:
@@ -168,22 +171,25 @@ def txn_upsert(writer, doc: Document):
     ddoc = {k: v for k, v in tdoc.items() if v is not None}
     writer.add_document(tantivy.Document(**ddoc))
 
+
 def txn_remove(writer, doc: Document):
     txn_remove_by_id(writer, doc.pk)
 
+
 def txn_remove_by_id(writer, doc_id):
     writer.delete_documents("id", [doc_id])
+
 
 def remove(document: Document):
     # TODO: check if autocommits
     with get_writer() as writer:
         txn_remove(writer, document)
 
+
 def upsert(document: Document):
     # TODO: check if autocommits
     with get_writer() as writer:
         txn_upsert(writer, document)
-
 
 
 class DelayedQuery:
@@ -236,8 +242,6 @@ class DelayedQuery:
         self.content_highlighter = None
         self.notes_highlighter = None
 
-
-
     def __len__(self):
         page = self[0:1]
         return len(page)
@@ -245,95 +249,100 @@ class DelayedQuery:
     def __getitem__(self, item) -> dict:
         if item.start in self.saved_results:
             return self.saved_results[item.start]
-        #from icecream import ic
+        # from icecream import ic
         q, mask = self._get_query()
 
         sortedby, reverse = self._get_query_sortedby()
 
         if not self.content_highlighter:
             self.content_highlighter = tantivy.SnippetGenerator.create(
-                                            searcher=self.searcher,
-                                            query=q,
-                                            schema=get_schema(),
-                                            field_name="content",
+                searcher=self.searcher,
+                query=q,
+                schema=get_schema(),
+                field_name="content",
             )
         if not self.notes_highlighter:
             self.notes_highlighter = tantivy.SnippetGenerator.create(
-                                            searcher=self.searcher,
-                                            query=q,
-                                            schema=get_schema(),
-                                            field_name="notes",
+                searcher=self.searcher,
+                query=q,
+                schema=get_schema(),
+                field_name="notes",
             )
 
         page = []
 
         search_results = self.searcher.search(
-            query = q,
-            offset = item.start,
-            limit = self.page_size,
-            order_by_field = sortedby,
-            order = tantivy.Order.Desc if reverse else tantivy.Order.Asc,
+            query=q,
+            offset=item.start,
+            limit=self.page_size,
+            order_by_field=sortedby,
+            order=tantivy.Order.Desc if reverse else tantivy.Order.Asc,
         )
 
         if len(search_results.hits) == 0:
             self.saved_results[item.start] = page
             return page
 
-        #from icecream import ic
+        # from icecream import ic
 
-        if self.first_score is None and item.start == 0 and len(search_results.hits) > 0:
+        if (
+            self.first_score is None
+            and item.start == 0
+            and len(search_results.hits) > 0
+        ):
             self.first_score = search_results.hits[0][0]
 
         self.number_of_hits = search_results.count
 
-
-        for rank_in_page, doc_score  in enumerate(search_results.hits):
+        for rank_in_page, doc_score in enumerate(search_results.hits):
             score, doc_id = doc_score
             doc = self.searcher.doc(doc_id)
             d = doc.to_dict()
             del d["content"]
             del d["notes"]
-            d = {k:v[0] for k,v in d.items()}
+            d = {k: v[0] for k, v in d.items()}
 
             d["score"] = score
             d["score_norm"] = float(score) / self.first_score
             d["rank"] = item.start + rank_in_page
             d["highlights"] = [self.content_highlighter.snippet_from_doc(doc).to_html()]
-            d["note_highlights"] = [self.notes_highlighter.snippet_from_doc(doc).to_html()]
+            d["note_highlights"] = [
+                self.notes_highlighter.snippet_from_doc(doc).to_html()
+            ]
             page.append(d)
 
         self.retreived_hits = len(page)
 
         self.saved_results[item.start] = page
-        #ic(page)
+        # ic(page)
         return page
+
 
 class DelayedFullTextQuery(DelayedQuery):
     def _get_query(self):
         q_str = self.query_params["query"]
         q_fields = [
-                "content",
-                "title",
-                "correspondent",
-                "tag",
-                "type",
-                "notes",
-                "custom_fields",
-            ]
+            "content",
+            "title",
+            "correspondent",
+            "tag",
+            "type",
+            "notes",
+            "custom_fields",
+        ]
 
         q, error = index().parse_query_lenient(
             query=q_str,
             default_field_names=q_fields,
         )
-        #from icecream import ic
-        #ic(q_str, q, error)
+        # from icecream import ic
+        # ic(q_str, q, error)
 
         return q, False
 
 
 class DelayedMoreLikeThisQuery(DelayedQuery):
     def _get_query(self):
-
         # Requires enable scoring. How?
         more_like_doc_id = int(self.query_params["more_like_id"])
         id_lookup_query = tantivy.Query.term_query(
@@ -342,7 +351,7 @@ class DelayedMoreLikeThisQuery(DelayedQuery):
             field_value=more_like_doc_id,
         )
         results = index().searcher().search(id_lookup_query)
-        docaddr =  results.hits[0][1]
+        docaddr = results.hits[0][1]
         query = tantivy.Query.more_like_this_query(docaddr)
 
         # q = query.Or(
@@ -393,12 +402,14 @@ class DelayedMoreLikeThisQuery(DelayedQuery):
 
 
 def autocomplete(
-     ix: tantivy.Index,
-     term: str,
-     limit: int = 10,
-     user: Optional[User] = None,
- ):
+    ix: tantivy.Index,
+    term: str,
+    limit: int = 10,
+    user: Optional[User] = None,
+):
     return []
+
+
 #     """
 #     Mimics whoosh.reading.IndexReader.most_distinctive_terms with permissions
 #     and without scoring
@@ -434,7 +445,6 @@ def autocomplete(
 
 
 def get_permissions_criterias(user: Optional[User] = None):
-
     user_criterias = [tantivy.Query.Term("has_owner", False)]
     if user is not None:
         if user.is_superuser:  # superusers see all docs
