@@ -49,7 +49,7 @@ services:
       - media:/usr/src/paperless/paperless-ngx/media
       - /srv/paperless/export:/usr/src/paperless/export
     environment:
-      PAPERLESS_REDIS: redis://broker:6379
+      PAPERLESS_REDIS: redis://broker-dev:6379
       PAPERLESS_TIKA_ENABLED: 1
       PAPERLESS_TIKA_GOTENBERG_ENDPOINT: http://gotenberg-dev:3000
       PAPERLESS_TIKA_ENDPOINT: http://tika-dev:9998
@@ -62,9 +62,9 @@ services:
     # Overrides default command so things don't shut down after the process ends.
     command: /bin/sh -c "chown -R paperless:paperless /usr/src/paperless/paperless-ngx/src/documents/static/frontend && chown -R paperless:paperless /usr/src/paperless/paperless-ngx/.ruff_cache && while sleep 1000; do :; done"
     networks:
-      - paperless
+      - paperless-dev
 
-  gotenberg:
+  gotenberg-dev:
     image: docker.io/gotenberg/gotenberg:7.10
     restart: unless-stopped
 
@@ -75,24 +75,24 @@ services:
       - "--chromium-disable-javascript=true"
       - "--chromium-allow-list=file:///tmp/.*"
     networks:
-      - paperless
+      - paperless-dev
 
 
-  tika:
+  tika-dev:
     image: docker.io/apache/tika:latest
     networks:
-      - paperless
+      - paperless-dev
     restart: unless-stopped
 
-  broker:
+  broker-dev:
     image: docker.io/library/redis:7
     restart: unless-stopped
     volumes:
       - redisdata:/data
     networks:
-      - paperless
+      - paperless-dev
 
-  db:
+  db-dev:
     image: docker.io/library/postgres:16
     restart: unless-stopped
     volumes:
@@ -102,12 +102,12 @@ services:
       POSTGRES_USER: paperless
       POSTGRES_PASSWORD: paperless
     networks:
-      - paperless
+      - paperless-dev
 
 
 
 networks:
-  paperless:
+  paperless-dev:
     external:
       name: paperless
 
