@@ -389,7 +389,7 @@ class DocumentViewSet(
         response = super().update(request, *args, **kwargs)
         from documents import index
 
-        index.add_or_update_document(self.get_object())
+        index.upsert(self.get_object())
 
         document_updated.send(
             sender=self.__class__,
@@ -401,7 +401,7 @@ class DocumentViewSet(
     def destroy(self, request, *args, **kwargs):
         from documents import index
 
-        index.remove_document_from_index(self.get_object())
+        index.remove(self.get_object())
         return super().destroy(request, *args, **kwargs)
 
     @staticmethod
@@ -689,7 +689,7 @@ class DocumentViewSet(
 
                 from documents import index
 
-                index.add_or_update_document(doc)
+                index.upsert(doc)
 
                 notes = self.getNotes(doc)
 
@@ -726,7 +726,7 @@ class DocumentViewSet(
 
             from documents import index
 
-            index.add_or_update_document(doc)
+            index.remove(doc)
 
             return Response(self.getNotes(doc))
 
@@ -1206,7 +1206,7 @@ class GlobalSearchView(PassUserMixin):
                 )
                 results = fts_query[0:1]
                 docs = docs | Document.objects.filter(
-                    id__in=[r["id"] for r in results["hits"]],
+                    id__in=[r["id"] for r in results],
                 )
             docs = docs[:OBJECT_LIMIT]
         saved_views = (

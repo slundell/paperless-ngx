@@ -54,15 +54,18 @@ logger = logging.getLogger("paperless.tasks")
 def index_optimize():
    index.optimize()
 
-
 def index_reindex(progress_bar_disable=False):
-    documents = Document.objects.all()
+    documents = Document.objects.all().iterator()
 
-    index.index(recreate=True)
+    index.create_index()
 
-    with index.get_writer() as writer:
+    with index.get_writer(heap_size_mb=settings.REINDEX_MEMORY) as writer:
         for document in tqdm.tqdm(documents, disable=progress_bar_disable):
-            index.txn_upsert(writer, document)
+            try:
+                logger.info(f"Content length: {len(document.content)}")
+                index.txn_upsert(writer, document)
+            except ValueError as e:
+                logger.error(f"Error indexing document {document}: {e}")
         logger.info("Committing index")
     logger.info("Indexing complete")
 

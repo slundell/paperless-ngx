@@ -7,6 +7,8 @@ from typing import Optional
 import tantivy
 from django.conf import settings
 from django.db.models import QuerySet
+from filelock import FileLock
+from filelock import Timeout
 from guardian.shortcuts import get_users_with_perms
 
 from documents.models import CustomFieldInstance
@@ -19,44 +21,24 @@ logger = logging.getLogger("paperless.index")
 
 def get_schema():
     tokenizer = settings.INDEX_TOKENIZER
+
     schema_builder = tantivy.SchemaBuilder()
 
     schema_builder.add_integer_field("id", stored=True, indexed=True, fast=True)
+    schema_builder.add_integer_field("asn", stored=True, indexed=True)
     schema_builder.add_text_field("title", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("content", stored=True, tokenizer_name=tokenizer)
-    schema_builder.add_integer_field("asn", stored=True, indexed=True)
-    schema_builder.add_text_field("correspondent", stored=True)
-    schema_builder.add_integer_field(
-        "correspondent_id", stored=True, indexed=True, fast=True
-    )
-    schema_builder.add_boolean_field("has_correspondent", stored=True, indexed=True)
-    schema_builder.add_text_field("tag", stored=True)
-    schema_builder.add_integer_field("tag_id", stored=True, indexed=True, fast=True)
-    schema_builder.add_boolean_field("has_tag", stored=True, indexed=True, fast=True)
+    schema_builder.add_text_field("correspondent", stored=True, tokenizer_name=tokenizer)
+    schema_builder.add_text_field("tags", stored=True)
     schema_builder.add_text_field("type", stored=True)
-    schema_builder.add_integer_field("type_id", stored=True, indexed=True, fast=True)
-    schema_builder.add_boolean_field("has_type", stored=True, indexed=True)
-    schema_builder.add_date_field("created", stored=True, fast=True)
-    schema_builder.add_date_field("modified", stored=True)
-    schema_builder.add_date_field("added", stored=True)
     schema_builder.add_text_field("path", stored=True)
-    schema_builder.add_integer_field("path_id", stored=True, indexed=True, fast=True)
-    schema_builder.add_boolean_field("has_path", stored=True, indexed=True)
+    schema_builder.add_date_field("created", stored=True, fast=True)
+    schema_builder.add_date_field("modified", stored=True, fast=True)
+    schema_builder.add_date_field("added", stored=True, fast=True)
     schema_builder.add_text_field("notes", stored=True, tokenizer_name=tokenizer)
-    schema_builder.add_integer_field("num_notes", stored=True, indexed=True, fast=True)
-    schema_builder.add_text_field("custom_fields", stored=True)
-    schema_builder.add_integer_field(
-        "custom_field_count", stored=True, indexed=True, fast=True
-    )
-    schema_builder.add_boolean_field("has_custom_fields", stored=True, indexed=True)
-    schema_builder.add_integer_field("custom_fields_id", stored=True, indexed=True)
-    schema_builder.add_text_field("owner", stored=True)
-    schema_builder.add_integer_field("owner_id", stored=True)
-    schema_builder.add_boolean_field("has_owner", stored=True, indexed=True)
-    schema_builder.add_integer_field("viewer_id", stored=True)
-    schema_builder.add_text_field("checksum", stored=True)
-    schema_builder.add_text_field("original_filename", stored=True)
-    schema_builder.add_boolean_field("is_shared", stored=True, indexed=True)
+    schema_builder.add_text_field("custom_fields", stored=True, tokenizer_name=tokenizer)
+    schema_builder.add_text_field("owner", stored=True, fast=True)
+    schema_builder.add_text_field("original_filename", stored=True, fast=True)
 
     schema = schema_builder.build()
 
@@ -69,22 +51,38 @@ def optimize():
     writer.wait_merging_threads()
 
 
-def index(recreate=False) -> tantivy.Index:
-    if not recreate:
-        try:
-            return tantivy.Index(
-                schema=get_schema(), path=str(settings.INDEX_DIR), reuse=True
-            )
-        except Exception as e:
-            logger.exception(f"Unable to open index: {settings.INDEX_DIR!s}")
-            logger.exception(f"Caught exception: {e!s}")
+def create_index() -> tantivy.Index:
 
-    logger.info(f"Creating new index: {settings.INDEX_DIR!s}")
-    if os.path.isdir(str(settings.INDEX_DIR)):
-        rmtree(str(settings.INDEX_DIR))
-    os.mkdir(str(settings.INDEX_DIR))
+    try:
+        with FileLock(settings.INDEX_DIR / ".lock", timeout=10):
+            logger.info(f"Creating new index: {settings.INDEX_DIR!s}")
+            if os.path.isdir(str(settings.INDEX_DIR)):
+                logger.info(f"Removing old index from path: {settings.INDEX_DIR!s}")
+                rmtree(str(settings.INDEX_DIR))
+            os.mkdir(str(settings.INDEX_DIR))
 
-    return tantivy.Index(schema=get_schema(), path=str(settings.INDEX_DIR), reuse=False)
+            return tantivy.Index(schema=get_schema(), path=str(settings.INDEX_DIR), reuse=False)
+    except Timeout as e:
+        logger.error(f"Timeout while trying to lock the index directory: {e!s}")
+        return None
+
+
+def index() -> tantivy.Index:
+    try:
+        return tantivy.Index(schema=get_schema(), path=str(settings.INDEX_DIR), reuse=True)
+    except ValueError as e:
+        if len(e.args) == 1 and e.args[0] == "Schema error: 'An index exists but the schema does not match.'":
+                logger.error(
+                    "Index exists but the schema does not match. "
+                    "Please rebuild the index from scratch.",
+                )
+        else:
+            raise e
+    except Exception as e:
+        logger.exception(f"Unable to open index: {settings.INDEX_DIR!s}")
+        logger.exception(f"Caught exception: {e!s}")
+
+    return create_index()
 
 
 def last_modified():
@@ -93,8 +91,11 @@ def last_modified():
 
 
 @contextmanager
-def get_writer():  # -> tantivy.IndexWriter:
-    writer = index().writer()
+def get_writer(heap_size_mb = None):  # -> tantivy.IndexWriter:
+    if not heap_size_mb:
+        writer = index().writer()
+    else:
+        writer = index().writer(heap_size_mb * 1024 * 1024)
 
     try:
         yield writer
@@ -108,68 +109,54 @@ def get_writer():  # -> tantivy.IndexWriter:
 
 
 def txn_upsert(writer, doc: Document):
-    tags = ",".join([t.name for t in doc.tags.all()])
-    tags_ids = ",".join([str(t.id) for t in doc.tags.all()])
-    notes = ",".join([str(c.note) for c in Note.objects.filter(document=doc)])
-    custom_fields = ",".join(
-        [str(c) for c in CustomFieldInstance.objects.filter(document=doc)],
-    )
-    custom_fields_ids = ",".join(
-        [str(f.field.id) for f in CustomFieldInstance.objects.filter(document=doc)],
-    )
-    asn = doc.archive_serial_number
-    if asn is not None and (
-        asn < Document.ARCHIVE_SERIAL_NUMBER_MIN
-        or asn > Document.ARCHIVE_SERIAL_NUMBER_MAX
-    ):
-        logger.error(
-            f"Not indexing Archive Serial Number {asn} of document {doc.pk}. "
-            f"ASN is out of range "
-            f"[{Document.ARCHIVE_SERIAL_NUMBER_MIN:,}, "
-            f"{Document.ARCHIVE_SERIAL_NUMBER_MAX:,}.",
-        )
-        asn = 0
-    users_with_perms = get_users_with_perms(
-        doc,
-        only_with_perms_in=["view_document"],
-    )
-    viewer_ids = ",".join([str(u.id) for u in users_with_perms])
+
     tdoc = dict(
         id=doc.pk,
         title=doc.title,
         content=doc.content,
-        correspondent=doc.correspondent.name if doc.correspondent else None,
-        correspondent_id=doc.correspondent.id if doc.correspondent else None,
-        has_correspondent=doc.correspondent is not None,
-        tag=tags if tags else None,
-        tag_id=tags_ids if tags_ids else None,
-        has_tag=len(tags) > 0,
-        type=doc.document_type.name if doc.document_type else None,
-        type_id=doc.document_type.id if doc.document_type else None,
-        has_type=doc.document_type is not None,
         created=doc.created.timestamp(),
         added=doc.added.timestamp(),
-        asn=asn,
         modified=doc.modified.timestamp(),
-        path=doc.storage_path.name if doc.storage_path else None,
-        path_id=doc.storage_path.id if doc.storage_path else None,
-        has_path=doc.storage_path is not None,
-        notes=notes,
-        num_notes=len(notes),
-        custom_fields=custom_fields,
-        custom_field_count=len(doc.custom_fields.all()),
-        has_custom_fields=len(custom_fields) > 0,
-        custom_fields_id=custom_fields_ids if custom_fields_ids else None,
-        owner=doc.owner.username if doc.owner else None,
-        owner_id=doc.owner.id if doc.owner else None,
-        has_owner=doc.owner is not None,
-        viewer_id=viewer_ids if viewer_ids else None,
-        checksum=doc.checksum,
         original_filename=doc.original_filename,
-        is_shared=len(viewer_ids) > 0,
     )
-    ddoc = {k: v for k, v in tdoc.items() if v is not None}
-    writer.add_document(tantivy.Document(**ddoc))
+
+    if doc.correspondent:
+        tdoc["correspondent"] = doc.correspondent.name
+
+    if doc.document_type:
+        tdoc["type"] = doc.document_type.name
+
+    if doc.storage_path:
+        tdoc["path"] = doc.storage_path.name
+
+    if doc.owner:
+        tdoc["owner"] = doc.owner.username
+
+    tags = doc.tags.all()
+    if len(tags) > 0:
+        tdoc["tags"] = ",".join([t.name for t in tags])
+
+    notes = Note.objects.filter(document=doc)
+    if len(notes) > 0:
+        tdoc["notes"] = ",".join([str(c.note) for c in notes])
+
+    custom_fields = CustomFieldInstance.objects.filter(document=doc)
+    if len(custom_fields) > 0:
+        tdoc["custom_fields"] = ",".join([str(c) for c in custom_fields])
+
+    asn = doc.archive_serial_number
+    if asn is not None:
+        if asn >= Document.ARCHIVE_SERIAL_NUMBER_MIN and asn <= Document.ARCHIVE_SERIAL_NUMBER_MAX:
+            tdoc["asn"] = asn
+        else:
+            logger.error(
+                f"Not indexing Archive Serial Number {asn} of document {doc.pk}. "
+                f"ASN is out of range "
+                f"[{Document.ARCHIVE_SERIAL_NUMBER_MIN:,}, "
+                f"{Document.ARCHIVE_SERIAL_NUMBER_MAX:,}.",
+            )
+
+    writer.add_document(tantivy.Document(**tdoc))
 
 
 def txn_remove(writer, doc: Document):
@@ -237,14 +224,17 @@ class DelayedQuery:
         self.page_size = page_size
         self.saved_results = dict()
         self.first_score = None
+
         self.filter_queryset = filter_queryset
+        self.filtered_doc_ids = filter_queryset.order_by("id").values_list("id", flat=True)
 
         self.content_highlighter = None
         self.notes_highlighter = None
+        self.number_of_hits = 0
 
     def __len__(self):
-        page = self[0:1]
-        return len(page)
+        _ = self[0:1] # force calculation of number of hits
+        return self.number_of_hits
 
     def __getitem__(self, item) -> dict:
         if item.start in self.saved_results:
@@ -298,16 +288,21 @@ class DelayedQuery:
             score, doc_id = doc_score
             doc = self.searcher.doc(doc_id)
             d = doc.to_dict()
-            del d["content"]
-            del d["notes"]
-            d = {k: v[0] for k, v in d.items()}
+
+            if "content" in d:
+                del d["content"]
+
+            if "notes" in d:
+                del d["notes"]
+
+            d = {k: v[0] for k, v in d.items()} # tantivy returns each hit as a 1-element list of values
 
             d["score"] = score
             d["score_norm"] = float(score) / self.first_score
             d["rank"] = item.start + rank_in_page
             d["highlights"] = [self.content_highlighter.snippet_from_doc(doc).to_html()]
             d["note_highlights"] = [
-                self.notes_highlighter.snippet_from_doc(doc).to_html()
+                self.notes_highlighter.snippet_from_doc(doc).to_html(),
             ]
             page.append(d)
 
@@ -325,7 +320,7 @@ class DelayedFullTextQuery(DelayedQuery):
             "content",
             "title",
             "correspondent",
-            "tag",
+            "tags",
             "type",
             "notes",
             "custom_fields",
@@ -335,8 +330,10 @@ class DelayedFullTextQuery(DelayedQuery):
             query=q_str,
             default_field_names=q_fields,
         )
-        # from icecream import ic
-        # ic(q_str, q, error)
+        q = tantivy.Query.boolean_query([
+            (tantivy.Occur.Must, q),
+            (tantivy.Occur.Must, tantivy.Query.term_set_query(get_schema(), "id", self.filtered_doc_ids)),
+        ])
 
         return q, False
 
