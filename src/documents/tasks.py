@@ -203,7 +203,7 @@ def bulk_update_documents(document_ids):
         )
         post_save.send(Document, instance=doc, created=False)
 
-    with index.index_writer() as writer:
+    with index.get_writer() as writer:
         for doc in documents:
             index.txn_upsert(writer, doc)
 

@@ -17,11 +17,11 @@ class TestAutoComplete(DirectoriesMixin, TestCase):
         doc2 = Document.objects.create(title="doc2", checksum="B", content="test test2")
         doc3 = Document.objects.create(title="doc3", checksum="C", content="test2")
 
-        index.add_or_update_document(doc1)
-        index.add_or_update_document(doc2)
-        index.add_or_update_document(doc3)
+        index.upsert(doc1)
+        index.upsert(doc2)
+        index.upsert(doc3)
 
-        ix = index.open_index()
+        ix = index.index()
 
         self.assertListEqual(
             index.autocomplete(ix, "tes"),
@@ -54,12 +54,12 @@ class TestAutoComplete(DirectoriesMixin, TestCase):
         )
         with self.assertLogs("paperless.index", level="ERROR") as cm:
             with mock.patch(
-                "documents.index.AsyncWriter.update_document",
-            ) as mocked_update_doc:
-                index.add_or_update_document(doc1)
+                "documents.index.upsert",
+            ) as mocked_upsert:
+                index.upsert(doc1)
 
-                mocked_update_doc.assert_called_once()
-                _, kwargs = mocked_update_doc.call_args
+                mocked_upsert.assert_called_once()
+                _, kwargs = mocked_upsert.call_args
 
                 self.assertEqual(kwargs["asn"], 0)
 
@@ -82,11 +82,11 @@ class TestAutoComplete(DirectoriesMixin, TestCase):
             content="test test2 test3",
         )
         with mock.patch(
-            "documents.index.AsyncWriter.update_document",
-        ) as mocked_update_doc:
-            index.add_or_update_document(doc1)
+            "documents.index.upsert",
+        ) as mocked_upsert:
+            index.upsert(doc1)
 
-            mocked_update_doc.assert_called_once()
-            _, kwargs = mocked_update_doc.call_args
+            mocked_upsert.assert_called_once()
+            _, kwargs = mocked_upsert.call_args
 
             self.assertIsNone(kwargs["asn"])

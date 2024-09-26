@@ -24,6 +24,8 @@ if configuration_path and os.path.exists(configuration_path):
     load_dotenv(configuration_path)
 elif os.path.exists("../paperless.conf"):
     load_dotenv("../paperless.conf")
+elif os.path.exists("./paperless.conf"):
+    load_dotenv("./paperless.conf")
 elif os.path.exists("/etc/paperless.conf"):
     load_dotenv("/etc/paperless.conf")
 elif os.path.exists("/usr/local/etc/paperless.conf"):
@@ -1203,3 +1205,4 @@ EMPTY_TRASH_DELAY = max(__get_int("PAPERLESS_EMPTY_TRASH_DELAY", 30), 1)
 ###############################################################################
 
 INDEX_TOKENIZER: Final[str] = os.getenv("PAPERLESS_INDEX_TOKENIZER", "en_stem")
+REINDEX_MEMORY: Final[int] = os.getenv("PAPERLESS_REINDEX_MEMORY", 256)
