@@ -354,7 +354,7 @@ class DocumentClassifier:
         # Lower case the document
         content = content.lower().strip()
         # Reduce spaces
-        content = re.sub(r"\s+", " ", content)
+        content = re.sub(r"\s\s+", " ", content)
         # Get only the letters
         content = re.sub(r"[^\w\s]", " ", content)
 
@@ -371,6 +371,7 @@ class DocumentClassifier:
 
             try:
                 # Preload the corpus early, to force the lazy loader to transform
+                nltk.download('stopwords')
                 stopwords.ensure_loaded()
 
                 # Do some one time setup

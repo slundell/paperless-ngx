@@ -133,7 +133,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
                     title=f"Document {i+1}",
                     content="content",
                 )
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         response = self.client.get("/api/documents/?query=content&page=0&page_size=10")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
@@ -171,10 +171,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             pk=3,
             checksum="C",
         )
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:[-1 week to now]")
         results = response.data["results"]
@@ -226,10 +226,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             # 7 days, 1 hour and 1 minute ago
             added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
         )
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:[-1 week to now]")
         results = response.data["results"]
@@ -278,10 +278,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             # 7 days, 1 hour and 1 minute ago
             added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
         )
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:[-1 week to now]")
         results = response.data["results"]
@@ -330,10 +330,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
         )
 
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:[-1 month to now]")
         results = response.data["results"]
@@ -386,10 +386,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             added=timezone.now() - timedelta(days=7, hours=1, minutes=1),
         )
 
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:[-1 month to now]")
         results = response.data["results"]
@@ -442,10 +442,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         # Django converts dates to UTC
         d3.refresh_from_db()
 
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/documents/?query=added:20231201")
         results = response.data["results"]
@@ -476,8 +476,8 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             pk=1,
         )
 
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
 
         response = self.client.get("/api/documents/?query=added:invalid-date")
         results = response.data["results"]
@@ -551,9 +551,9 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         )
 
         with index.get_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/search/autocomplete/?term=app")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -562,7 +562,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         d3.owner = u2
 
         with index.get_writer() as writer:
-            index.update_document(writer, d3)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/search/autocomplete/?term=app")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -571,7 +571,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         assign_perm("view_document", u1, d3)
 
         with index.get_writer() as writer:
-            index.update_document(writer, d3)
+            index.txn_upsert(writer, d3)
 
         response = self.client.get("/api/search/autocomplete/?term=app")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -594,7 +594,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         )
 
         with index.get_writer() as writer:
-            index.update_document(writer, d1)
+            index.txn_upsert(writer, d1)
 
         response = self.client.get("/api/search/autocomplete/?term=created:2023")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -616,7 +616,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         )
 
         with index.get_writer() as writer:
-            index.update_document(writer, d1)
+            index.txn_upsert(writer, d1)
 
         response = self.client.get("/api/search/autocomplete/?term=auto")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -632,7 +632,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
                     title=f"Document {i+1}",
                     content=f"Things document {i+1}",
                 )
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         response = self.client.get("/api/search/?query=thing")
         correction = response.data["corrected_query"]
@@ -679,10 +679,10 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
             checksum="ABC",
         )
         with index.get_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
-            index.update_document(writer, d4)
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
+            index.txn_upsert(writer, d4)
 
         response = self.client.get(f"/api/documents/?more_like_id={d2.id}")
 
@@ -759,7 +759,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
 
         with index.get_writer() as writer:
             for doc in Document.objects.all():
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         def search_query(q):
             r = self.client.get("/api/documents/?query=test" + q)
@@ -977,7 +977,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
 
         with index.get_writer() as writer:
             for doc in Document.objects.all():
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         self.client.force_authenticate(user=u1)
         r = self.client.get("/api/documents/?query=test")
@@ -1030,7 +1030,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
 
         with index.get_writer() as writer:
             for doc in Document.objects.all():
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         self.client.force_authenticate(user=u1)
         r = self.client.get("/api/documents/?query=test")
@@ -1052,7 +1052,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
 
         with index.get_writer() as writer:
             for doc in [d1, d2, d3]:
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         self.client.force_authenticate(user=u1)
         r = self.client.get("/api/documents/?query=test")
@@ -1117,7 +1117,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
 
         with index.get_writer() as writer:
             for doc in Document.objects.all():
-                index.update_document(writer, doc)
+                index.txn_upsert(writer, doc)
 
         def search_query(q):
             r = self.client.get("/api/documents/?query=test" + q)
@@ -1213,12 +1213,12 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         )
         set_permissions([4, 5], set_permissions=[], owner=user2, merge=False)
 
-        with index.open_index_writer() as writer:
-            index.update_document(writer, d1)
-            index.update_document(writer, d2)
-            index.update_document(writer, d3)
-            index.update_document(writer, d4)
-            index.update_document(writer, d5)
+        with index.get_writer() as writer:
+            index.txn_upsert(writer, d1)
+            index.txn_upsert(writer, d2)
+            index.txn_upsert(writer, d3)
+            index.txn_upsert(writer, d4)
+            index.txn_upsert(writer, d5)
 
         correspondent1 = Correspondent.objects.create(name="bank correspondent 1")
         Correspondent.objects.create(name="correspondent 2")

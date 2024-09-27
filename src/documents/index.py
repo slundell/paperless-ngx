@@ -351,9 +351,7 @@ class DelayedMoreLikeThisQuery(DelayedQuery):
         docaddr = results.hits[0][1]
         query = tantivy.Query.more_like_this_query(docaddr)
 
-        # q = query.Or(
-        #     [query.Term("content", word, boost=weight) for word, weight in kts],
-        # )
+
         mask = {more_like_doc_id}
 
         return query, mask

@@ -18,7 +18,7 @@
 			"options": {
 				"cwd": "${workspaceFolder}/src"
 			}
-			
+
 		},
 		{
 			"label": "manage.py runserver",
@@ -42,6 +42,25 @@
 			"label": "Maintenance: manage.py document_index reindex",
 			"type": "shell",
 			"command": "pipenv run python manage.py document_index reindex",
+			"group": "none",
+			"presentation": {
+				"echo": true,
+				"reveal": "always",
+				"focus": true,
+				"panel": "shared",
+				"showReuseMessage": false,
+				"clear": true,
+				"revealProblems": "onProblem"
+			},
+			"options": {
+				"cwd": "${workspaceFolder}/src"
+			},
+			"problemMatcher": []
+		},
+		{
+			"label": "Maintenance: train classifier",
+			"type": "shell",
+			"command": "pipenv run python manage.py document_create_classifier",
 			"group": "none",
 			"presentation": {
 				"echo": true,
