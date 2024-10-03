@@ -25,9 +25,10 @@ def get_schema():
     schema_builder = tantivy.SchemaBuilder()
 
     schema_builder.add_integer_field("id", stored=True, indexed=True, fast=True)
-    schema_builder.add_integer_field("asn", stored=True, indexed=True)
+    schema_builder.add_integer_field("asn", stored=True, indexed=True, fast=True)
     schema_builder.add_text_field("title", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("content", stored=True, tokenizer_name=tokenizer)
+    schema_builder.add_integer_field("content_length", stored=True, fast=True)
     schema_builder.add_text_field("correspondent", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("tags", stored=True)
     schema_builder.add_text_field("type", stored=True)
@@ -38,6 +39,7 @@ def get_schema():
     schema_builder.add_text_field("notes", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("custom_fields", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("owner", stored=True, fast=True)
+    schema_builder.add_boolean_field("has_owner", stored=True, fast=True)
     schema_builder.add_text_field("original_filename", stored=True, fast=True)
 
     schema = schema_builder.build()
@@ -85,9 +87,9 @@ def index() -> tantivy.Index:
     return create_index()
 
 
+
 def last_modified():
-    # index(recreate=False))
-    return None
+    return os.path.getmtime(settings.INDEX_DIR)
 
 
 @contextmanager
@@ -113,12 +115,23 @@ def txn_upsert(writer, doc: Document):
     tdoc = dict(
         id=doc.pk,
         title=doc.title,
-        content=doc.content,
-        created=doc.created.timestamp(),
-        added=doc.added.timestamp(),
-        modified=doc.modified.timestamp(),
-        original_filename=doc.original_filename,
     )
+
+    if doc.content:
+        tdoc["content"] = doc.content
+        tdoc["content_length"] = len(doc.content)
+
+    if doc.created:
+        tdoc["created"] = doc.created.timestamp()
+
+    if doc.added:
+        tdoc["added"] = doc.added.timestamp()
+
+    if doc.modified:
+        tdoc["modified"] = doc.modified.timestamp()
+
+    if doc.original_filename:
+        tdoc["original_filename"] = doc.original_filename
 
     if doc.correspondent:
         tdoc["correspondent"] = doc.correspondent.name
@@ -131,6 +144,19 @@ def txn_upsert(writer, doc: Document):
 
     if doc.owner:
         tdoc["owner"] = doc.owner.username
+        tdoc["owner_id"] = doc.owner.pk
+        tdoc["has_owner"] = True
+    else:
+        tdoc["has_owner"] = False
+
+    users_with_perms = get_users_with_perms(
+            doc,
+            only_with_perms_in=["view_document"],
+    )
+
+    if users_with_perms:
+        tdoc["viewer_ids"] = ",".join([str(u.id) for u in users_with_perms])
+
 
     tags = doc.tags.all()
     if len(tags) > 0:
@@ -162,21 +188,23 @@ def txn_upsert(writer, doc: Document):
 def txn_remove(writer, doc: Document):
     txn_remove_by_id(writer, doc.pk)
 
-
 def txn_remove_by_id(writer, doc_id):
-    writer.delete_documents("id", [doc_id])
-
+    writer.delete_documents("id", doc_id)
 
 def remove(document: Document):
     # TODO: check if autocommits
     with get_writer() as writer:
         txn_remove(writer, document)
+        #writer.commit()
 
 
 def upsert(document: Document):
     # TODO: check if autocommits
     with get_writer() as writer:
         txn_upsert(writer, document)
+        #writer.commit()
+
+
 
 
 class DelayedQuery:
@@ -450,3 +478,21 @@ def get_permissions_criterias(user: Optional[User] = None):
                 tantivy.Query.Term("viewer_id", str(user.id)),
             )
     return user_criterias
+
+
+def get_documents_stats(user: User):
+    num_docs = index().searcher().num_docs
+
+     # aggregation not yet released in tantivy
+    #  total_content_length = index().searcher().aggregate(
+    #     search_query=tantivy.Query.all_query(),
+    #     agg_query = [{"sum": "content_length"}],
+    #  )
+
+    total_content_length = 0
+    sch = index().searcher()
+    results = sch.search(tantivy.Query.all_query(), limit=num_docs)
+    for score, doc_id in results.hits:
+        doc = sch.doc(doc_id)
+        total_content_length += doc["content_length"][0]
+    return num_docs, total_content_length

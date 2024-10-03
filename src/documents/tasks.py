@@ -52,22 +52,44 @@ logger = logging.getLogger("paperless.tasks")
 
 @shared_task
 def index_optimize():
-   index.optimize()
+    index.optimize()
 
 def index_reindex(progress_bar_disable=False):
-    documents = Document.objects.all().iterator()
+    documents = Document.objects.all()
 
     index.create_index()
 
     with index.get_writer(heap_size_mb=settings.REINDEX_MEMORY) as writer:
-        for document in tqdm.tqdm(documents, disable=progress_bar_disable):
+        for document in tqdm.tqdm(iterable=documents.iterator(), total=documents.count(), disable=progress_bar_disable):
             try:
-                logger.info(f"Content length: {len(document.content)}")
                 index.txn_upsert(writer, document)
             except ValueError as e:
                 logger.error(f"Error indexing document {document}: {e}")
         logger.info("Committing index")
-    logger.info("Indexing complete")
+    logger.info("Indexing complete, optimizing...")
+    index.optimize()
+    logger.info("Optimization complete.")
+
+
+def index_refresh(progress_bar_disable=False):
+    documents = Document.objects.all()
+
+    try:
+        index.index()
+    except Exception as e:
+        logger.error(f"Error opening existing index: {e}")
+        index.create_index()
+
+    with index.get_writer(heap_size_mb=settings.REINDEX_MEMORY) as writer:
+        for document in tqdm.tqdm(iterable=documents.iterator(), total=documents.count(), disable=progress_bar_disable):
+            try:
+                index.txn_upsert(writer, document)
+            except ValueError as e:
+                logger.error(f"Error indexing document {document}: {e}")
+        logger.info("Committing index")
+    logger.info("Indexing complete, optimizing...")
+    index.optimize()
+    logger.info("Optimization complete.")
 
 
 @shared_task

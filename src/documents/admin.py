@@ -89,13 +89,13 @@ class DocumentAdmin(GuardedModelAdmin):
     def delete_model(self, request, obj):
         from documents import index
 
-        index.remove_document_from_index(obj)
+        index.remove(obj)
         super().delete_model(request, obj)
 
     def save_model(self, request, obj, form, change):
         from documents import index
 
-        index.add_or_update_document(obj)
+        index.upsert(obj)
         super().save_model(request, obj, form, change)
 
 

@@ -1204,5 +1204,5 @@ EMPTY_TRASH_DELAY = max(__get_int("PAPERLESS_EMPTY_TRASH_DELAY", 30), 1)
 # Indexing for full-text search                                               #
 ###############################################################################
 
-INDEX_TOKENIZER: Final[str] = os.getenv("PAPERLESS_INDEX_TOKENIZER", "en_stem")
-REINDEX_MEMORY: Final[int] = os.getenv("PAPERLESS_REINDEX_MEMORY", 256)
+INDEX_TOKENIZER: Final[str] = os.getenv("PAPERLESS_INDEX_TOKENIZER", "sv_stem") # Unable to check this automatically
+REINDEX_MEMORY: Final[int] = os.getenv("PAPERLESS_REINDEX_MEMORY", 1024)

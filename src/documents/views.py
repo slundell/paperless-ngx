@@ -1369,7 +1369,7 @@ class StatisticsView(APIView):
     permission_classes = (IsAuthenticated,)
 
     def get(self, request, format=None):
-        user = request.user if request.user is not None else None
+        user = request.user
 
         documents = (
             (

@@ -57,6 +57,7 @@ uvicorn = {extras = ["standard"], version = "==0.25.0"}
 watchdog = "~=4.0"
 whitenoise = "~=6.7"
 zxing-cpp = {version = "*", platform_machine = "== 'x86_64'"}
+icecream = "*"
 
 [dev-packages]
 # Linting
@@ -78,6 +79,7 @@ daphne = "*"
 # Documentation
 mkdocs-material = "*"
 mkdocs-glightbox = "*"
+pixi = "*"
 
 [typing-dev]
 mypy = "*"

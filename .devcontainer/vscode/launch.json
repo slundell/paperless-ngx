@@ -1,6 +1,7 @@
 {
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "manage.py runserver",
             "type": "python",
@@ -21,6 +22,26 @@
             "args": ["document_consumer"],
             "django": true
         },
+				{
+					"name": "manage.py document_create_classifier",
+					"type": "python",
+					"request": "launch",
+					"program": "${workspaceFolder}/src/manage.py",
+					"console": "integratedTerminal",
+					"justMyCode": true,
+					"args": ["document_create_classifier"],
+					"django": true
+			  },
+				{
+					"name": "manage.py document_index reindex",
+					"type": "python",
+					"request": "launch",
+					"program": "${workspaceFolder}/src/manage.py",
+					"console": "integratedTerminal",
+					"justMyCode": true,
+					"args": ["document_index", "reindex"],
+					"django": true
+			  },
         {
             "name": "celery",
             "type": "python",
