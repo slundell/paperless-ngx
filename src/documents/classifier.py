@@ -22,6 +22,17 @@ from documents.caching import CLASSIFIER_MODIFIED_KEY
 from documents.caching import CLASSIFIER_VERSION_KEY
 from documents.models import Document
 from documents.models import MatchingModel
+import nltk
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
+from nltk.tokenize import word_tokenize
+nltk.download("stopwords", download_dir=settings.NLTK_DIR)
+nltk.download("punkt_tab", download_dir=settings.NLTK_DIR)
+# Not really hacky, since it isn't private and is documented, but
+# set the search path for NLTK data to the single location it should be in
+nltk.data.path = [settings.NLTK_DIR]
+
+
 
 logger = logging.getLogger("paperless.classifier")
 
@@ -175,7 +186,7 @@ class DocumentClassifier:
         # Step 1: Extract and preprocess training data from the database.
         logger.debug("Gathering data from database...")
         hasher = sha256()
-        for doc in docs_queryset:
+        for doc in docs_queryset[:100]:
             y = -1
             dt = doc.document_type
             if dt and dt.matching_algorithm == MatchingModel.MATCH_AUTO:
@@ -257,7 +268,7 @@ class DocumentClassifier:
             """
             Generates the content for documents, but once at a time
             """
-            for doc in docs_queryset:
+            for doc in docs_queryset[:100]:
                 yield self.preprocess_content(doc.content)
 
         self.data_vectorizer = CountVectorizer(
@@ -360,18 +371,11 @@ class DocumentClassifier:
 
         # If the NLTK language is supported, do further processing
         if settings.NLTK_LANGUAGE is not None and settings.NLTK_ENABLED:
-            import nltk
-            from nltk.corpus import stopwords
-            from nltk.stem import SnowballStemmer
-            from nltk.tokenize import word_tokenize
 
-            # Not really hacky, since it isn't private and is documented, but
-            # set the search path for NLTK data to the single location it should be in
-            nltk.data.path = [settings.NLTK_DIR]
 
             try:
                 # Preload the corpus early, to force the lazy loader to transform
-                nltk.download('stopwords')
+
                 stopwords.ensure_loaded()
 
                 # Do some one time setup
@@ -395,6 +399,7 @@ class DocumentClassifier:
                     # These are words like "a", "and", "the" which add little meaning
                     if word in self._stop_words:
                         continue
+                    #meaningful_words += " " + self._stemmer.stem(word)
                     # Stem the words
                     # This reduces the words to their stems.
                     # "amazement" returns "amaz"

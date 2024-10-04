@@ -1,3 +1,4 @@
+import tantivy
 from django.contrib.admin.sites import AdminSite
 from django.test import TestCase
 from django.utils import timezone
@@ -10,9 +11,16 @@ from documents.tests.utils import DirectoriesMixin
 
 class TestDocumentAdmin(DirectoriesMixin, TestCase):
     def get_document_from_index(self, doc):
-        ix = index.open_index()
-        with ix.searcher() as searcher:
-            return searcher.document(id=doc.id)
+
+        ix = index.index()
+        q = tantivy.Query.term_query(schema=index.get_schema(), field_name="id", field_value=doc.id)
+        r = ix.searcher().search(q)
+        if len(r.hits) == 0:
+            return None
+        _, hit = r.hits[0]
+        doc = ix.searcher().doc(hit).to_dict()
+        d = {k: v[0] for k, v in doc.items()}
+        return d
 
     def setUp(self) -> None:
         super().setUp()
@@ -28,7 +36,8 @@ class TestDocumentAdmin(DirectoriesMixin, TestCase):
 
     def test_delete_model(self):
         doc = Document.objects.create(title="test")
-        index.add_or_update_document(doc)
+        index.upsert(doc)
+
         self.assertIsNotNone(self.get_document_from_index(doc))
 
         self.doc_admin.delete_model(None, doc)
@@ -44,7 +53,7 @@ class TestDocumentAdmin(DirectoriesMixin, TestCase):
                 checksum=f"{i:02}",
             )
             docs.append(doc)
-            index.add_or_update_document(doc)
+            index.upsert(doc)
 
         self.assertEqual(Document.objects.count(), 42)
 

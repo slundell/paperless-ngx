@@ -1018,6 +1018,7 @@ class TestDocumentSearchApi(DirectoriesMixin, APITestCase):
         THEN:
             - Only docs with granted view permissions are returned
         """
+        index.create_index()
         u1 = User.objects.create_user("user1")
         u2 = User.objects.create_user("user2")
         u1.user_permissions.add(*Permission.objects.filter(codename="view_document"))
