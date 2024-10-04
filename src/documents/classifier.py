@@ -26,8 +26,8 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
 from nltk.tokenize import word_tokenize
-nltk.download("stopwords", download_dir=settings.NLTK_DIR)
-nltk.download("punkt_tab", download_dir=settings.NLTK_DIR)
+#nltk.download("stopwords", download_dir=settings.NLTK_DIR)
+#nltk.download("punkt_tab", download_dir=settings.NLTK_DIR)
 # Not really hacky, since it isn't private and is documented, but
 # set the search path for NLTK data to the single location it should be in
 nltk.data.path = [settings.NLTK_DIR]
