@@ -2,7 +2,6 @@ import logging
 import os
 from contextlib import contextmanager
 from shutil import rmtree
-from typing import Optional
 
 import tantivy
 from django.conf import settings
@@ -20,6 +19,7 @@ logger = logging.getLogger("paperless.index")
 
 
 def get_schema():
+
     tokenizer = settings.INDEX_TOKENIZER
 
     schema_builder = tantivy.SchemaBuilder()
@@ -222,6 +222,7 @@ class DelayedQuery:
             "archive_serial_number": "asn",
             "num_notes": "num_notes",
             "owner": "owner",
+            "page_count": "page_count",
         }
 
         if field.startswith("-"):
@@ -426,7 +427,7 @@ def autocomplete(
     ix: tantivy.Index,
     term: str,
     limit: int = 10,
-    user: Optional[User] = None,
+    user: User | None = None,
 ):
     return []
 
@@ -465,8 +466,10 @@ def autocomplete(
 #     return terms
 
 
+
 def get_permissions_criterias(user: Optional[User] = None):
     user_criterias = [tantivy.Query.Term("has_owner", False)]
+
     if user is not None:
         if user.is_superuser:  # superusers see all docs
             user_criterias = []

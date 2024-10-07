@@ -1,53 +1,24 @@
-import { popperOptionsWithAutoOffset } from './popper-options'
+import { popperOptionsReenablePreventOverflow } from './popper-options'
 import { Options } from '@popperjs/core'
 
-describe('popperOptionsWithAutoOffset', () => {
-  let mockDropdownElement
+describe('popperOptionsReenablePreventOverflow', () => {
+  it('should return the config without the empty fun preventOverflow, add padding to other', () => {
+    const config: Partial<Options> = {
+      modifiers: [
+        { name: 'preventOverflow', fn: function () {} },
+        {
+          name: 'preventOverflow',
+          fn: function (arg0) {
+            return
+          },
+        },
+      ],
+    }
 
-  beforeEach(() => {
-    mockDropdownElement = jest.fn() as any
-    mockDropdownElement.offsetLeft = 100
-  })
+    const result = popperOptionsReenablePreventOverflow(config)
 
-  it('should not add offset modifier when window width is 400 or more', () => {
-    window.innerWidth = 400
-    const config: Partial<Options> = { modifiers: [] }
-    const context = { _nativeElement: mockDropdownElement }
-
-    const result = popperOptionsWithAutoOffset.call(context, config)
-
-    expect(result.modifiers).toHaveLength(0)
-  })
-
-  it('should calculate the correct offset when there is right overflow', () => {
-    window.innerWidth = 300
-    const config: Partial<Options> = { modifiers: [] }
-    const context = { _nativeElement: mockDropdownElement }
-
-    const result = popperOptionsWithAutoOffset.call(context, config)
-    const offsetFunction = result.modifiers[0].options.offset
-    const offset = offsetFunction({
-      popper: { width: 250 },
-      reference: {},
-      placement: 'bottom',
-    })
-
-    expect(offset).toEqual([-60, 0]) // (300 - 10) - (100 + 250) = -60
-  })
-
-  it('should calculate the correct offset when there is no right overflow', () => {
-    window.innerWidth = 300
-    const config: Partial<Options> = { modifiers: [] }
-    const context = { _nativeElement: mockDropdownElement }
-
-    const result = popperOptionsWithAutoOffset.call(context, config)
-    const offsetFunction = result.modifiers[0].options.offset
-    const offset = offsetFunction({
-      popper: { width: 100 },
-      reference: {},
-      placement: 'bottom',
-    })
-
-    expect(offset).toEqual([0, 0]) // No overflow
+    expect(result.modifiers.length).toBe(1)
+    expect(result.modifiers[0].name).toBe('preventOverflow')
+    expect(result.modifiers[0].options).toEqual({ padding: 10 })
   })
 })

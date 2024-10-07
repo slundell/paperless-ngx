@@ -4,14 +4,13 @@ import random
 import uuid
 from collections import namedtuple
 from contextlib import AbstractContextManager
-from typing import Optional
-from typing import Union
 from unittest import mock
 
 import pytest
 from django.core.management import call_command
 from django.db import DatabaseError
 from django.test import TestCase
+from django.utils import timezone
 from imap_tools import NOT
 from imap_tools import EmailAddress
 from imap_tools import FolderInfo
@@ -19,6 +18,7 @@ from imap_tools import MailboxFolderSelectError
 from imap_tools import MailboxLoginError
 from imap_tools import MailMessage
 from imap_tools import MailMessageFlags
+from imap_tools import errors
 
 from documents.models import Correspondent
 from documents.tests.utils import DirectoriesMixin
@@ -30,6 +30,7 @@ from paperless_mail.mail import TagMailAction
 from paperless_mail.mail import apply_mail_action
 from paperless_mail.models import MailAccount
 from paperless_mail.models import MailRule
+from paperless_mail.models import ProcessedMail
 
 
 @dataclasses.dataclass
@@ -199,11 +200,11 @@ class MessageBuilder:
 
     def create_message(
         self,
-        attachments: Union[int, list[_AttachmentDef]] = 1,
+        attachments: int | list[_AttachmentDef] = 1,
         body: str = "",
         subject: str = "the subject",
         from_: str = "no_one@mail.com",
-        to: Optional[list[str]] = None,
+        to: list[str] | None = None,
         seen: bool = False,
         flagged: bool = False,
         processed: bool = False,
@@ -622,8 +623,8 @@ class TestMail(
         @dataclasses.dataclass(frozen=True)
         class FilterTestCase:
             name: str
-            include_pattern: Optional[str]
-            exclude_pattern: Optional[str]
+            include_pattern: str | None
+            exclude_pattern: str | None
             expected_matches: list[str]
 
         tests = [
@@ -1390,6 +1391,130 @@ class TestMail(
         self.assertEqual(len(self.mailMocker.bogus_mailbox.fetch("UNSEEN", False)), 0)
         self.assertEqual(len(self.mailMocker.bogus_mailbox.messages), 3)
 
+    def test_disabled_rule(self):
+        """
+        GIVEN:
+            - Mail rule is disabled
+        WHEN:
+            - Mail account is handled
+        THEN:
+            - Should not process any messages
+        """
+        account = MailAccount.objects.create(
+            name="test",
+            imap_server="",
+            username="admin",
+            password="secret",
+        )
+        MailRule.objects.create(
+            name="testrule",
+            account=account,
+            action=MailRule.MailAction.MARK_READ,
+            enabled=False,
+        )
+
+        self.mail_account_handler.handle_mail_account(account)
+        self.mailMocker.apply_mail_actions()
+
+        self.assertEqual(len(self.mailMocker.bogus_mailbox.messages), 3)
+        self.assertEqual(len(self.mailMocker.bogus_mailbox.fetch("UNSEEN", False)), 2)
+
+        self.mail_account_handler.handle_mail_account(account)
+        self.mailMocker.apply_mail_actions()
+        self.assertEqual(
+            len(self.mailMocker.bogus_mailbox.fetch("UNSEEN", False)),
+            2,
+        )  # still 2
+
+
+class TestPostConsumeAction(TestCase):
+    def setUp(self):
+        self.account = MailAccount.objects.create(
+            name="test",
+            imap_server="imap.test.com",
+            imap_port=993,
+            imap_security=MailAccount.ImapSecurity.SSL,
+            username="testuser",
+            password="password",
+        )
+        self.rule = MailRule.objects.create(
+            name="testrule",
+            account=self.account,
+            action=MailRule.MailAction.MARK_READ,
+            action_parameter="",
+            folder="INBOX",
+        )
+        self.message_uid = "12345"
+        self.message_subject = "Test Subject"
+        self.message_date = timezone.make_aware(timezone.datetime(2023, 1, 1, 12, 0, 0))
+
+    @mock.patch("paperless_mail.mail.get_mailbox")
+    @mock.patch("paperless_mail.mail.mailbox_login")
+    @mock.patch("paperless_mail.mail.get_rule_action")
+    def test_post_consume_success(
+        self,
+        mock_get_rule_action,
+        mock_mailbox_login,
+        mock_get_mailbox,
+    ):
+        mock_mailbox = mock.MagicMock()
+        mock_get_mailbox.return_value.__enter__.return_value = mock_mailbox
+        mock_action = mock.MagicMock()
+        mock_get_rule_action.return_value = mock_action
+
+        apply_mail_action(
+            result=[],
+            rule_id=self.rule.pk,
+            message_uid=self.message_uid,
+            message_subject=self.message_subject,
+            message_date=self.message_date,
+        )
+
+        mock_mailbox_login.assert_called_once_with(mock_mailbox, self.account)
+        mock_mailbox.folder.set.assert_called_once_with(self.rule.folder)
+        mock_action.post_consume.assert_called_once_with(
+            mock_mailbox,
+            self.message_uid,
+            self.rule.action_parameter,
+        )
+
+        processed_mail = ProcessedMail.objects.get(uid=self.message_uid)
+        self.assertEqual(processed_mail.status, "SUCCESS")
+
+    @mock.patch("paperless_mail.mail.get_mailbox")
+    @mock.patch("paperless_mail.mail.mailbox_login")
+    @mock.patch("paperless_mail.mail.get_rule_action")
+    def test_post_consume_failure(
+        self,
+        mock_get_rule_action,
+        mock_mailbox_login,
+        mock_get_mailbox,
+    ):
+        mock_mailbox = mock.MagicMock()
+        mock_get_mailbox.return_value.__enter__.return_value = mock_mailbox
+        mock_action = mock.MagicMock()
+        mock_get_rule_action.return_value = mock_action
+        mock_action.post_consume.side_effect = errors.ImapToolsError("Test Exception")
+
+        with (
+            self.assertRaises(errors.ImapToolsError),
+            self.assertLogs("paperless.mail", level="ERROR") as cm,
+        ):
+            apply_mail_action(
+                result=[],
+                rule_id=self.rule.pk,
+                message_uid=self.message_uid,
+                message_subject=self.message_subject,
+                message_date=self.message_date,
+            )
+            error_str = cm.output[0]
+            expected_str = "Error while processing mail action during post_consume"
+            self.assertIn(expected_str, error_str)
+
+        processed_mail = ProcessedMail.objects.get(uid=self.message_uid)
+        self.assertEqual(processed_mail.status, "FAILED")
+        self.assertIn("Test Exception", processed_mail.error)
+
 
 class TestManagementCommand(TestCase):
     @mock.patch(
@@ -1418,6 +1543,14 @@ class TestTasks(TestCase):
             username="A",
             password="A",
         )
+        MailRule.objects.create(
+            name="A",
+            account=MailAccount.objects.get(name="A"),
+        )
+        MailRule.objects.create(
+            name="B",
+            account=MailAccount.objects.get(name="B"),
+        )
 
         result = tasks.process_mail_accounts()
 
@@ -1427,3 +1560,33 @@ class TestTasks(TestCase):
         m.side_effect = lambda account: 0
         result = tasks.process_mail_accounts()
         self.assertIn("No new", result)
+
+    @mock.patch("paperless_mail.tasks.MailAccountHandler.handle_mail_account")
+    def test_accounts_no_enabled_rules(self, m):
+        m.side_effect = lambda account: 6
+
+        MailAccount.objects.create(
+            name="A",
+            imap_server="A",
+            username="A",
+            password="A",
+        )
+        MailAccount.objects.create(
+            name="B",
+            imap_server="A",
+            username="A",
+            password="A",
+        )
+        MailRule.objects.create(
+            name="A",
+            account=MailAccount.objects.get(name="A"),
+            enabled=False,
+        )
+        MailRule.objects.create(
+            name="B",
+            account=MailAccount.objects.get(name="B"),
+            enabled=False,
+        )
+
+        tasks.process_mail_accounts()
+        self.assertEqual(m.call_count, 0)

@@ -16,7 +16,8 @@ import { Subject, filter, take, takeUntil } from 'rxjs'
 import { SelectionDataItem } from 'src/app/services/rest/document.service'
 import { ObjectWithPermissions } from 'src/app/data/object-with-permissions'
 import { HotKeyService } from 'src/app/services/hot-key.service'
-import { popperOptionsWithAutoOffset } from 'src/app/utils/popper-options'
+import { popperOptionsReenablePreventOverflow } from 'src/app/utils/popper-options'
+
 
 export interface ChangedItems {
   itemsToAdd: MatchingModel[]
@@ -331,7 +332,8 @@ export class FilterableDropdownComponent implements OnDestroy, OnInit {
   @ViewChild('dropdown') dropdown: NgbDropdown
   @ViewChild('buttonItems') buttonItems: ElementRef
 
-  public popperOptions = popperOptionsWithAutoOffset
+  public popperOptions = popperOptionsReenablePreventOverflow
+
 
   filterText: string
 

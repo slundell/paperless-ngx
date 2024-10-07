@@ -41,6 +41,7 @@ import { DocumentCardSmallComponent } from './components/document-list/document-
 import { BulkEditorComponent } from './components/document-list/bulk-editor/bulk-editor.component'
 import { NgxFileDropModule } from 'ngx-file-drop'
 import { TextComponent } from './components/common/input/text/text.component'
+import { TextAreaComponent } from './components/common/input/textarea/textarea.component'
 import { SelectComponent } from './components/common/input/select/select.component'
 import { CheckComponent } from './components/common/input/check/check.component'
 import { UrlComponent } from './components/common/input/url/url.component'
@@ -108,6 +109,7 @@ import { FileDropComponent } from './components/file-drop/file-drop.component'
 import { CustomFieldsComponent } from './components/manage/custom-fields/custom-fields.component'
 import { CustomFieldEditDialogComponent } from './components/common/edit-dialog/custom-field-edit-dialog/custom-field-edit-dialog.component'
 import { CustomFieldsDropdownComponent } from './components/common/custom-fields-dropdown/custom-fields-dropdown.component'
+import { CustomFieldsQueryDropdownComponent } from './components/common/custom-fields-query-dropdown/custom-fields-query-dropdown.component'
 import { ProfileEditDialogComponent } from './components/common/profile-edit-dialog/profile-edit-dialog.component'
 import { PdfViewerModule } from 'ng2-pdf-viewer'
 import { DocumentLinkComponent } from './components/common/input/document-link/document-link.component'
@@ -141,6 +143,7 @@ import {
   arrowRightShort,
   arrowUpRight,
   asterisk,
+  braces,
   bodyText,
   boxArrowUp,
   boxArrowUpRight,
@@ -198,6 +201,7 @@ import {
   link,
   listTask,
   listUl,
+  nodePlus,
   pencil,
   people,
   peopleFill,
@@ -227,6 +231,7 @@ import {
   uiRadios,
   upcScan,
   x,
+  xCircle,
   xLg,
 } from 'ngx-bootstrap-icons'
 
@@ -242,6 +247,7 @@ const icons = {
   arrowRightShort,
   arrowUpRight,
   asterisk,
+  braces,
   bodyText,
   boxArrowUp,
   boxArrowUpRight,
@@ -299,6 +305,7 @@ const icons = {
   link,
   listTask,
   listUl,
+  nodePlus,
   pencil,
   people,
   peopleFill,
@@ -328,6 +335,7 @@ const icons = {
   uiRadios,
   upcScan,
   x,
+  xCircle,
   xLg,
 }
 
@@ -433,6 +441,7 @@ function initializeApp(settings: SettingsService) {
     DocumentCardSmallComponent,
     BulkEditorComponent,
     TextComponent,
+    TextAreaComponent,
     SelectComponent,
     CheckComponent,
     UrlComponent,
@@ -485,6 +494,7 @@ function initializeApp(settings: SettingsService) {
     CustomFieldsComponent,
     CustomFieldEditDialogComponent,
     CustomFieldsDropdownComponent,
+    CustomFieldsQueryDropdownComponent,
     ProfileEditDialogComponent,
     DocumentLinkComponent,
     PreviewPopupComponent,

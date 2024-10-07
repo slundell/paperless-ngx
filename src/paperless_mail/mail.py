@@ -10,8 +10,6 @@ from datetime import timedelta
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import TYPE_CHECKING
-from typing import Optional
-from typing import Union
 
 import magic
 import pathvalidate
@@ -30,6 +28,7 @@ from imap_tools import MailboxFolderSelectError
 from imap_tools import MailBoxUnencrypted
 from imap_tools import MailMessage
 from imap_tools import MailMessageFlags
+from imap_tools import errors
 from imap_tools.mailbox import MailBoxTls
 from imap_tools.query import LogicOperator
 
@@ -84,7 +83,7 @@ class BaseMailAction:
     read mails when the action is to mark mails as read).
     """
 
-    def get_criteria(self) -> Union[dict, LogicOperator]:
+    def get_criteria(self) -> dict | LogicOperator:
         """
         Returns filtering criteria/query for this mail action.
         """
@@ -268,7 +267,14 @@ def apply_mail_action(
             M.folder.set(rule.folder)
 
             action = get_rule_action(rule, supports_gmail_labels)
-            action.post_consume(M, message_uid, rule.action_parameter)
+            try:
+                action.post_consume(M, message_uid, rule.action_parameter)
+            except errors.ImapToolsError:
+                logger = logging.getLogger("paperless_mail")
+                logger.exception(
+                    "Error while processing mail action during post_consume",
+                )
+                raise
 
         ProcessedMail.objects.create(
             owner=rule.owner,
@@ -453,7 +459,7 @@ class MailAccountHandler(LoggingMixin):
         else:
             self.log.debug(f"Skipping mail preprocessor {preprocessor_type.NAME}")
 
-    def _correspondent_from_name(self, name: str) -> Optional[Correspondent]:
+    def _correspondent_from_name(self, name: str) -> Correspondent | None:
         try:
             return Correspondent.objects.get_or_create(name=name)[0]
         except DatabaseError as e:
@@ -465,7 +471,7 @@ class MailAccountHandler(LoggingMixin):
         message: MailMessage,
         att: MailAttachment,
         rule: MailRule,
-    ) -> Optional[str]:
+    ) -> str | None:
         if rule.assign_title_from == MailRule.TitleSource.FROM_SUBJECT:
             return message.subject
 
@@ -484,7 +490,7 @@ class MailAccountHandler(LoggingMixin):
         self,
         message: MailMessage,
         rule: MailRule,
-    ) -> Optional[Correspondent]:
+    ) -> Correspondent | None:
         c_from = rule.assign_correspondent_from
 
         if c_from == MailRule.CorrespondentSource.FROM_NOTHING:
@@ -538,6 +544,9 @@ class MailAccountHandler(LoggingMixin):
                 )
 
                 for rule in account.rules.order_by("order"):
+                    if not rule.enabled:
+                        self.log.debug(f"Rule {rule}: Skipping disabled rule")
+                        continue
                     try:
                         total_processed_files += self._handle_mail_rule(
                             M,
@@ -569,13 +578,17 @@ class MailAccountHandler(LoggingMixin):
         rule: MailRule,
         supports_gmail_labels: bool,
     ):
-        self.log.debug(f"Rule {rule}: Selecting folder {rule.folder}")
-
+        folders = [rule.folder]
+        # In case of MOVE, make sure also the destination exists
+        if rule.action == MailRule.MailAction.MOVE:
+            folders.insert(0, rule.action_parameter)
         try:
-            M.folder.set(rule.folder)
+            for folder in folders:
+                self.log.debug(f"Rule {rule}: Selecting folder {folder}")
+                M.folder.set(folder)
         except MailboxFolderSelectError as err:
             self.log.error(
-                f"Unable to access folder {rule.folder}, attempting folder listing",
+                f"Unable to access folder {folder}, attempting folder listing",
             )
             try:
                 for folder_info in M.folder.list():
@@ -587,7 +600,7 @@ class MailAccountHandler(LoggingMixin):
                 )
 
             raise MailError(
-                f"Rule {rule}: Folder {rule.folder} "
+                f"Rule {rule}: Folder {folder} "
                 f"does not exist in account {rule.account}",
             ) from err
 
@@ -688,7 +701,7 @@ class MailAccountHandler(LoggingMixin):
 
     def filename_inclusion_matches(
         self,
-        filter_attachment_filename_include: Optional[str],
+        filter_attachment_filename_include: str | None,
         filename: str,
     ) -> bool:
         if filter_attachment_filename_include:
@@ -707,7 +720,7 @@ class MailAccountHandler(LoggingMixin):
 
     def filename_exclusion_matches(
         self,
-        filter_attachment_filename_exclude: Optional[str],
+        filter_attachment_filename_exclude: str | None,
         filename: str,
     ) -> bool:
         if filter_attachment_filename_exclude:

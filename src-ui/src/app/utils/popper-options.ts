@@ -1,21 +1,19 @@
 import { Options } from '@popperjs/core'
 
-export function popperOptionsWithAutoOffset(
+
+export function popperOptionsReenablePreventOverflow(
   config: Partial<Options>
 ): Partial<Options> {
-  const windowWidth = window?.innerWidth
-  if (windowWidth < 400) {
-    const dropdownElement: HTMLElement = this['_nativeElement'] // method is scoped, 'this' is NgbDropdown
-    config.modifiers.push({
-      name: 'offset',
-      options: {
-        offset: ({ popper, reference, placement }) => {
-          const rightOverflow =
-            windowWidth - 10 - (dropdownElement.offsetLeft + popper.width)
-          return [rightOverflow < 0 ? rightOverflow : 0, 0]
-        },
-      },
-    })
+  config.modifiers = config.modifiers?.filter(
+    (m) => !(m.name === 'preventOverflow' && m.fn?.length === 0)
+  )
+  const ogPreventOverflowModifier = config.modifiers.find(
+    (m) => m.name === 'preventOverflow'
+  )
+  if (ogPreventOverflowModifier) {
+    ogPreventOverflowModifier.options = {
+      padding: 10,
+    }
   }
   return config
 }
