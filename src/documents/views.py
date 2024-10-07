@@ -866,8 +866,6 @@ class UnifiedSearchViewSet(DocumentViewSet):
                 self.paginator.get_page_size(self.request),
                 filter_queryset=filtered_queryset,
             )
-            from icecream import ic
-            ic(r)
             return r
         else:
             return filtered_queryset

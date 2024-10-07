@@ -24,18 +24,18 @@ def get_schema():
 
     schema_builder = tantivy.SchemaBuilder()
 
-    schema_builder.add_integer_field("id", stored=True, indexed=True, fast=True)
-    schema_builder.add_integer_field("asn", stored=True, indexed=True, fast=True)
+    schema_builder.add_unsigned_field("id", stored=True, indexed=True, fast=True)
+    schema_builder.add_unsigned_field("asn", stored=True, indexed=True, fast=True)
     schema_builder.add_text_field("title", stored=True, tokenizer_name=tokenizer)
-    schema_builder.add_text_field("content", stored=True, tokenizer_name=tokenizer)
-    schema_builder.add_integer_field("content_length", stored=True, fast=True)
+    schema_builder.add_text_field("content", stored=False, tokenizer_name=tokenizer)
+    schema_builder.add_unsigned_field("content_length", stored=True, fast=True)
     schema_builder.add_text_field("correspondent", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("tags", stored=True)
     schema_builder.add_text_field("type", stored=True)
     schema_builder.add_text_field("path", stored=True)
-    schema_builder.add_date_field("created", stored=True, fast=True)
-    schema_builder.add_date_field("modified", stored=True, fast=True)
-    schema_builder.add_date_field("added", stored=True, fast=True)
+    schema_builder.add_date_field("created", indexed=True, fast=True)
+    schema_builder.add_date_field("modified", indexed=True, fast=True)
+    schema_builder.add_date_field("added", indexed=True, fast=True)
     schema_builder.add_text_field("notes", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("custom_fields", stored=True, tokenizer_name=tokenizer)
     schema_builder.add_text_field("owner", stored=True, fast=True)
@@ -112,42 +112,41 @@ def get_writer(heap_size_mb = None):  # -> tantivy.IndexWriter:
 
 def txn_upsert(writer, doc: Document):
 
-    tdoc = dict(
-        id=doc.pk,
-        title=doc.title,
-    )
+    d = tantivy.Document()
+    d.add_unsigned("id", doc.pk)
+    d.add_text("title", doc.title)
 
     if doc.content:
-        tdoc["content"] = doc.content
-        tdoc["content_length"] = len(doc.content)
+        d.add_text("content", doc.content)
+        d.add_unsigned("content_length", len(doc.content))
 
     if doc.created:
-        tdoc["created"] = doc.created.timestamp()
+        d.add_date("created", doc.created)
 
     if doc.added:
-        tdoc["added"] = doc.added.timestamp()
+        d.add_date("added", doc.added)
 
     if doc.modified:
-        tdoc["modified"] = doc.modified.timestamp()
+        d.add_date("modified", doc.modified)
 
     if doc.original_filename:
-        tdoc["original_filename"] = doc.original_filename
+        d.add_text("original_filename", doc.original_filename)
 
     if doc.correspondent:
-        tdoc["correspondent"] = doc.correspondent.name
+        d.add_text("correspondent", doc.correspondent.name)
 
     if doc.document_type:
-        tdoc["type"] = doc.document_type.name
+        d.add_text("type", doc.document_type.name)
 
     if doc.storage_path:
-        tdoc["path"] = doc.storage_path.name
+        d.add_text("path", doc.storage_path.name)
 
     if doc.owner:
-        tdoc["owner"] = doc.owner.username
-        tdoc["owner_id"] = doc.owner.pk
-        tdoc["has_owner"] = True
+        d.add_text("owner", doc.owner.username)
+        d.add_unsigned("owner_id", doc.owner.pk)
+        d.add_boolean("has_owner", True)
     else:
-        tdoc["has_owner"] = False
+        d.add_boolean("has_owner", False)
 
     users_with_perms = get_users_with_perms(
             doc,
@@ -155,25 +154,25 @@ def txn_upsert(writer, doc: Document):
     )
 
     if users_with_perms:
-        tdoc["viewer_ids"] = ",".join([str(u.id) for u in users_with_perms])
+        d.add_text("viewer_ids", ",".join([str(u.id) for u in users_with_perms]))
 
 
     tags = doc.tags.all()
     if len(tags) > 0:
-        tdoc["tags"] = ",".join([t.name for t in tags])
+        d.add_text("tags", ",".join([t.name for t in tags]))
 
     notes = Note.objects.filter(document=doc)
     if len(notes) > 0:
-        tdoc["notes"] = ",".join([str(c.note) for c in notes])
+        d.add_text("notes", ",".join([str(c.note) for c in notes]))
 
     custom_fields = CustomFieldInstance.objects.filter(document=doc)
     if len(custom_fields) > 0:
-        tdoc["custom_fields"] = ",".join([str(c) for c in custom_fields])
+        d.add_text("custom_fields", ",".join([str(c) for c in custom_fields]))
 
     asn = doc.archive_serial_number
     if asn is not None:
         if asn >= Document.ARCHIVE_SERIAL_NUMBER_MIN and asn <= Document.ARCHIVE_SERIAL_NUMBER_MAX:
-            tdoc["asn"] = asn
+            d.add_unsigned("asn", asn)
         else:
             logger.error(
                 f"Not indexing Archive Serial Number {asn} of document {doc.pk}. "
@@ -182,7 +181,7 @@ def txn_upsert(writer, doc: Document):
                 f"{Document.ARCHIVE_SERIAL_NUMBER_MAX:,}.",
             )
 
-    writer.add_document(tantivy.Document(**tdoc))
+    writer.add_document(d)
 
 
 def txn_remove(writer, doc: Document):
@@ -192,17 +191,13 @@ def txn_remove_by_id(writer, doc_id):
     writer.delete_documents("id", doc_id)
 
 def remove(document: Document):
-    # TODO: check if autocommits
     with get_writer() as writer:
         txn_remove(writer, document)
-        #writer.commit()
-
 
 def upsert(document: Document):
-    # TODO: check if autocommits
     with get_writer() as writer:
         txn_upsert(writer, document)
-        #writer.commit()
+
 
 
 
@@ -352,16 +347,19 @@ class DelayedFullTextQuery(DelayedQuery):
             "type",
             "notes",
             "custom_fields",
+            "added",
+            "created",
+            "modified",
         ]
 
         q, error = index().parse_query_lenient(
             query=q_str,
             default_field_names=q_fields,
         )
-        q = tantivy.Query.boolean_query([
-            (tantivy.Occur.Must, q),
-            (tantivy.Occur.Must, tantivy.Query.term_set_query(get_schema(), "id", self.filtered_doc_ids)),
-        ])
+        # q = tantivy.Query.boolean_query([
+        #     (tantivy.Occur.Must, q),
+        #     (tantivy.Occur.Must, tantivy.Query.term_set_query(get_schema(), "id", self.filtered_doc_ids)),
+        # ])
 
         return q, False
 

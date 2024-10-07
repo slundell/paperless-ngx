@@ -1,19 +1,23 @@
 import logging
 import os
 import pickle
+import random
 import re
 import warnings
 from collections.abc import Iterator
+
+
+from datetime import datetime
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from pathlib import Path
 from typing import Optional
 
-if TYPE_CHECKING:
-    from datetime import datetime
-    from pathlib import Path
-
+import nltk
 from django.conf import settings
 from django.core.cache import cache
+from nltk.corpus import stopwords
+from nltk.stem import SnowballStemmer
+from nltk.tokenize import word_tokenize
 from sklearn.exceptions import InconsistentVersionWarning
 
 from documents.caching import CACHE_50_MINUTES
@@ -22,15 +26,12 @@ from documents.caching import CLASSIFIER_MODIFIED_KEY
 from documents.caching import CLASSIFIER_VERSION_KEY
 from documents.models import Document
 from documents.models import MatchingModel
-import nltk
-from nltk.corpus import stopwords
-from nltk.stem import SnowballStemmer
-from nltk.tokenize import word_tokenize
-#nltk.download("stopwords", download_dir=settings.NLTK_DIR)
-#nltk.download("punkt_tab", download_dir=settings.NLTK_DIR)
+
 # Not really hacky, since it isn't private and is documented, but
 # set the search path for NLTK data to the single location it should be in
 nltk.data.path = [settings.NLTK_DIR]
+# nltk.download("stopwords", download_dir=settings.NLTK_DIR)
+# nltk.download("punkt_tab", download_dir=settings.NLTK_DIR)
 
 
 
@@ -172,6 +173,8 @@ class DocumentClassifier:
             )
             .select_related("document_type", "correspondent", "storage_path")
             .prefetch_related("tags")
+            .defer("content")
+            .order_by("?") # random
         )
 
         # No documents exit to train against
@@ -186,7 +189,7 @@ class DocumentClassifier:
         # Step 1: Extract and preprocess training data from the database.
         logger.debug("Gathering data from database...")
         hasher = sha256()
-        for doc in docs_queryset[:100]:
+        for doc in docs_queryset:
             y = -1
             dt = doc.document_type
             if dt and dt.matching_algorithm == MatchingModel.MATCH_AUTO:
@@ -263,13 +266,27 @@ class DocumentClassifier:
 
         # Step 2: vectorize data
         logger.debug("Vectorizing data...")
+        Path("./data/training").mkdir(parents=True, exist_ok=True)
 
-        def content_generator() -> Iterator[str]:
+        def content_generator(number_of_samples: int) -> Iterator[str]:
             """
             Generates the content for documents, but once at a time
             """
-            for doc in docs_queryset[:100]:
-                yield self.preprocess_content(doc.content)
+
+            from django.db.models import Max
+
+            num_returned = 0
+            max_id = Document.objects.all().aggregate(max_id=Max("id"))["max_id"]
+            while True:
+                pk = random.randint(1, max_id)
+                document = Document.objects.filter(pk=pk, tags__is_inbox_tag=False).first()
+
+                if document:
+                    num_returned += 1
+                    if num_returned > number_of_samples:
+                        break
+                    yield self.preprocess_doc(document.pk)
+
 
         self.data_vectorizer = CountVectorizer(
             analyzer="word",
@@ -277,7 +294,7 @@ class DocumentClassifier:
             min_df=0.01,
         )
 
-        data_vectorized = self.data_vectorizer.fit_transform(content_generator())
+        data_vectorized = self.data_vectorizer.fit_transform(content_generator(1000000))
 
         # See the notes here:
         # https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.CountVectorizer.html
@@ -307,6 +324,8 @@ class DocumentClassifier:
         else:
             self.tags_classifier = None
             logger.debug("There are no tags. Not training tags classifier.")
+
+
 
         if num_correspondents > 0:
             logger.debug("Training correspondent classifier...")
@@ -355,6 +374,33 @@ class DocumentClassifier:
         cache.set(CLASSIFIER_VERSION_KEY, self.FORMAT_VERSION, CACHE_50_MINUTES)
 
         return True
+
+    def preprocess_doc(self, pk: int) -> str:
+        """
+        Preprocess a single document, updating the classifier if required
+        """
+        doc = Document.objects.get(pk=pk)
+        preprocessed_content_file = Path(f"./data/training/{doc.pk}.pickle")
+
+        if not preprocessed_content_file.is_file():
+            prepro = self.preprocess_content(doc.content)
+            with open(str(preprocessed_content_file), "wb") as f:
+                pickle.dump(prepro, f)
+            return prepro
+
+        file_modified = datetime.fromtimestamp(
+            preprocessed_content_file.stat().st_mtime,
+            tz=doc.modified.tzinfo,
+        )
+
+        if doc.modified > file_modified:
+            prepro = self.preprocess_content(doc.content)
+            with open(str(preprocessed_content_file), "wb") as f:
+                pickle.dump(prepro, f)
+            return prepro
+
+        with open(str(preprocessed_content_file), "rb") as f:
+            return pickle.load(f)
 
     def preprocess_content(self, content: str) -> str:  # pragma: no cover
         """
